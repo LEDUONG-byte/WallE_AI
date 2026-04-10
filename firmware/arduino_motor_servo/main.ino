@@ -1,60 +1,55 @@
 #include <Wire.h>
 #include <Adafruit_PWMServoDriver.h>
 
-// Khởi tạo mạch điều khiển Servo PCA9685
 Adafruit_PWMServoDriver pwm = Adafruit_PWMServoDriver();
 
 // =====================================================
-// CẤU HÌNH MOTOR - CẬP NHẬT THEO ĐÍNH CHÍNH MỚI
+// CẤU HÌNH MOTOR - PORT 9, 10, 11 CHO MOTOR PHẢI
 // =====================================================
+#define ENA 3   
+#define IN1 5   
+#define IN2 6   
 
-// Cụm Motor Trái (Giữ nguyên)
-#define ENA 3   // Chân băm xung PWM
-#define IN1 5   // Chân hướng 1
-#define IN2 6   // Chân hướng 2
+#define IN3 9   
+#define IN4 10  
+#define ENB 11  
 
-// Cụm Motor Phải (CẬP NHẬT: 9, 10, 11)
-#define IN3 9   // Chân hướng 1
-#define IN4 10  // Chân hướng 2
-#define ENB 11  // Chân băm xung PWM (Đã đổi từ 10 sang 11)
-
-// Chân điều khiển bật/tắt điện mạch Servo (OE)
 #define OE_PIN 13
 
-// Bộ đệm nhận lệnh
+// Lưu trữ trạng thái hiện tại để tránh ghi đè dữ liệu giống hệt nhau
+int currentServoAngles[16];   // Lưu góc của 16 kênh servo
+int currentMotorSpeed[3];    // Lưu tốc độ motor 1 và 2
+
 const int MAX_CMD_LEN = 20;
 char cmdBuffer[MAX_CMD_LEN];
 int bufIndex = 0;
 
 void setup() {
-  // Giao tiếp với ESP qua cổng Serial (Bắt buộc 115200)
+  // Tốc độ Serial cao để giảm độ trễ nhận lệnh
   Serial.begin(115200);
   
-  // Thiết lập các chân L298N là OUTPUT
-  pinMode(ENA, OUTPUT); 
-  pinMode(IN1, OUTPUT); 
-  pinMode(IN2, OUTPUT);
-  pinMode(IN3, OUTPUT); 
-  pinMode(IN4, OUTPUT); 
-  pinMode(ENB, OUTPUT);
+  pinMode(ENA, OUTPUT); pinMode(IN1, OUTPUT); pinMode(IN2, OUTPUT);
+  pinMode(IN3, OUTPUT); pinMode(IN4, OUTPUT); pinMode(ENB, OUTPUT);
   
-  // Cơ chế khởi động an toàn: Tắt điện Servo để ESP vào WiFi trước
   pinMode(OE_PIN, OUTPUT);
-  digitalWrite(OE_PIN, HIGH); // Mức HIGH = Tắt mạch PCA9685
+  digitalWrite(OE_PIN, HIGH); 
   
-  // Khởi tạo giao tiếp I2C cho mạch Servo
+  // Khởi tạo mảng trạng thái
+  for(int i=0; i<16; i++) currentServoAngles[i] = -1;
+  for(int i=0; i<3; i++) currentMotorSpeed[i] = -999;
+
   pwm.begin();
   pwm.setPWMFreq(60); 
 }
 
 void loop() {
-  // Đọc dữ liệu từ ESP (đẩy từ Python xuống)
+  // Đọc Serial không chặn
   while (Serial.available() > 0) {
     char c = Serial.read();
     
     if (c == '\n') {
       cmdBuffer[bufIndex] = '\0'; 
-      processCommand(cmdBuffer);  
+      if (bufIndex > 0) processCommand(cmdBuffer);  
       bufIndex = 0;               
     } 
     else if (c != '\r' && bufIndex < MAX_CMD_LEN - 1) {
@@ -63,48 +58,64 @@ void loop() {
   }
 }
 
-// HÀM XỬ LÝ LỆNH TỪ PYTHON (S:id:angle hoặc M:id:speed)
+// Hàm hỗ trợ cập nhật động cơ để dùng chung cho nhiều loại lệnh
+void updateMotor(int id, int value) {
+  if (id < 1 || id > 2) return;
+  if (value == currentMotorSpeed[id]) return; // Bỏ qua nếu giá trị không đổi
+
+  int targetValue = constrain(value, -255, 255);
+  int speed = abs(targetValue);
+  
+  if (id == 1) { // Motor Trái
+    analogWrite(ENA, speed); 
+    if (targetValue > 0) {
+      digitalWrite(IN1, HIGH); digitalWrite(IN2, LOW);
+    } else if (targetValue < 0) {
+      digitalWrite(IN1, LOW); digitalWrite(IN2, HIGH);
+    } else {
+      digitalWrite(IN1, LOW); digitalWrite(IN2, LOW);
+    }
+  }
+  else if (id == 2) { // Motor Phải
+    analogWrite(ENB, speed); 
+    if (targetValue > 0) {
+      digitalWrite(IN3, HIGH); digitalWrite(IN4, LOW);
+    } else if (targetValue < 0) {
+      digitalWrite(IN3, LOW); digitalWrite(IN4, HIGH);
+    } else {
+      digitalWrite(IN3, LOW); digitalWrite(IN4, LOW);
+    }
+  }
+  currentMotorSpeed[id] = value;
+}
+
 void processCommand(char* cmd) {
   char type;
-  int id, value;
+  int val1, val2;
 
-  // Giải mã chuỗi lệnh
-  if (sscanf(cmd, "%c:%d:%d", &type, &id, &value) == 3) {
+  // Giải mã lệnh cơ bản
+  if (sscanf(cmd, "%c:%d:%d", &type, &val1, &val2) != 3) return;
     
-    // 1. LỆNH ĐIỀU KHIỂN SERVO (S)
-    if (type == 'S') {
-      digitalWrite(OE_PIN, LOW); // Mở điện mạch Servo khi có lệnh
-      
-      value = constrain(value, 0, 180);
-      int pulse = map(value, 0, 180, 150, 600);
-      pwm.setPWM(id, 0, pulse);
-    } 
-    
-    // 2. LỆNH ĐIỀU KHIỂN MOTOR (M)
-    else if (type == 'M') {
-      value = constrain(value, -255, 255);
-      int speed = abs(value); 
-      
-      if (id == 1) { // Điều khiển Bánh trái
-        analogWrite(ENA, speed); 
-        if (value > 0) {
-          digitalWrite(IN1, HIGH); digitalWrite(IN2, LOW);
-        } else if (value < 0) {
-          digitalWrite(IN1, LOW); digitalWrite(IN2, HIGH);
-        } else {
-          digitalWrite(IN1, LOW); digitalWrite(IN2, LOW);
-        }
-      }
-      else if (id == 2) { // Điều khiển Bánh phải
-        analogWrite(ENB, speed); // Chân 11 hỗ trợ băm xung PWM
-        if (value > 0) {
-          digitalWrite(IN3, HIGH); digitalWrite(IN4, LOW);
-        } else if (value < 0) {
-          digitalWrite(IN3, LOW); digitalWrite(IN4, HIGH);
-        } else {
-          digitalWrite(IN3, LOW); digitalWrite(IN4, LOW);
-        }
-      }
-    }
+  // 1. LỆNH DRIVE ĐỒNG BỘ (D:speedLeft:speedRight) -> GIẢM ĐỘ TRỄ
+  if (type == 'D') {
+    updateMotor(1, val1);
+    updateMotor(2, val2);
+  }
+
+  // 2. LỆNH SERVO (S:id:angle)
+  else if (type == 'S') {
+    if (val1 < 0 || val1 > 15) return;
+    if (val2 == currentServoAngles[val1]) return;
+
+    digitalWrite(OE_PIN, LOW); 
+    val2 = constrain(val2, 0, 180);
+    int pulse = map(val2, 0, 180, 150, 600);
+    pwm.setPWM(val1, 0, pulse);
+    currentServoAngles[val1] = val2;
+  } 
+  
+  // 3. LỆNH MOTOR ĐƠN (M:id:speed)
+  else if (type == 'M') {
+    updateMotor(val1, val2);
   }
 }
