@@ -10,34 +10,31 @@ import json
 import concurrent.futures
 
 # ==========================================
-# 1. CẤU HÌNH HỆ THỐNG
+# CẤU HÌNH HỆ THỐNG
 # ==========================================
 ESP_PORT = 8080         
 DROIDCAM_PORT = 4747    
 WS_PORT = 8765          
 HTTP_PORT = 5000        
 
-# Các biến trạng thái toàn cục
+# Biến trạng thái toàn cục
 ESP_IP = None
 droidcam_ip = None
 esp_socket = None
 connected_websockets = set()
-main_loop = None  # Cần biến này để các luồng (thread) phụ có thể gọi lệnh tới asyncio
+main_loop = None
 
 # ==========================================
-# 2. HÀM QUÉT RADAR MẠNG NỘI BỘ
+# HÀM QUÉT RADAR
 # ==========================================
 def check_port(ip, port):
-    """Kiểm tra một IP có đang mở cổng cụ thể hay không"""
     sock = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
-    sock.settimeout(0.2) # Timeout rất nhanh để quét dải rộng
+    sock.settimeout(0.2)
     result = sock.connect_ex((ip, port))
     sock.close()
     return ip if result == 0 else None
 
 def scan_network(port):
-    """Quét toàn bộ dải mạng LAN để tìm thiết bị"""
-    # Lấy IP của máy tính hiện tại để suy ra dải mạng
     s = socket.socket(socket.AF_INET, socket.SOCK_DGRAM)
     try:
         s.connect(('10.255.255.255', 1))
@@ -51,19 +48,15 @@ def scan_network(port):
     ips = [f"{subnet}.{i}" for i in range(1, 255)]
     
     found_ip = None
-    # Sử dụng đa luồng (100 workers) để quét cực nhanh
     with concurrent.futures.ThreadPoolExecutor(max_workers=100) as executor:
         futures = [executor.submit(check_port, ip, port) for ip in ips]
         for future in concurrent.futures.as_completed(futures):
             res = future.result()
             if res:
                 found_ip = res
-                break # Dừng ngay khi tìm thấy thiết bị đầu tiên
+                break
     return found_ip
 
-# ==========================================
-# 3. KẾT NỐI TCP TỚI ROBOT (ESP)
-# ==========================================
 def connect_to_esp(ip):
     global esp_socket
     if esp_socket:
@@ -75,7 +68,7 @@ def connect_to_esp(ip):
         esp_socket = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
         esp_socket.settimeout(3)
         esp_socket.connect((ip, ESP_PORT))
-        esp_socket.settimeout(None) # Đưa về dạng blocking để luồng nhận dữ liệu hoạt động
+        esp_socket.settimeout(None)
         print("[+] ĐÃ KẾT NỐI ROBOT THÀNH CÔNG!")
         return True
     except:
@@ -83,19 +76,13 @@ def connect_to_esp(ip):
         print(f"[-] Không thể kết nối tới Robot tại {ip}")
         return False
 
-# ==========================================
-# 3.1. LUỒNG LẮNG NGHE DỮ LIỆU TỪ ROBOT (CHIỀU VỀ)
-# ==========================================
 def esp_receive_task():
-    """Luồng liên tục đọc phản hồi từ ESP và đẩy lên Web"""
     global esp_socket, main_loop
     while True:
         if esp_socket and main_loop:
             try:
-                # Đọc tối đa 1024 byte mỗi lần
                 data = esp_socket.recv(1024)
                 if data:
-                    # Gói dữ liệu lại và ném lên toàn bộ giao diện Web
                     msg = json.dumps({
                         "type": "esp_data", 
                         "data": data.decode('utf-8', errors='ignore')
@@ -103,127 +90,110 @@ def esp_receive_task():
                     for ws in list(connected_websockets):
                         asyncio.run_coroutine_threadsafe(ws.send(msg), main_loop)
                 else:
-                    # Mất kết nối
                     print("[-] ESP ngắt kết nối.")
                     esp_socket.close()
                     esp_socket = None
-            except Exception as e:
-                if esp_socket:
-                    esp_socket.close()
+            except Exception:
+                if esp_socket: esp_socket.close()
                 esp_socket = None
         else:
-            time.sleep(1) # Nghỉ ngơi nếu chưa kết nối ESP
+            time.sleep(1)
 
 # ==========================================
-# 4. WEBSOCKET HANDLER (GIAO TIẾP VỚI WEB)
+# WEBSOCKET HANDLER (BẢO VỆ PHIÊN BẢN CŨ/MỚI)
 # ==========================================
-async def bridge_handler(websocket):
+# Thêm *args để chống văng lỗi trên các thư viện websockets bản cũ
+async def bridge_handler(websocket, *args, **kwargs):
     global esp_socket, connected_websockets, droidcam_ip
+    print(f"\n[+] Giao diện Web đã kết nối vào luồng điều khiển!")
     connected_websockets.add(websocket)
     
-    # Khi một trang web mới mở ra, gửi ngay IP DroidCam nếu đã tìm thấy
-    if droidcam_ip:
-        await websocket.send(json.dumps({"type": "droidcam", "ip": droidcam_ip}))
-
     try:
+        if droidcam_ip:
+            await websocket.send(json.dumps({"type": "droidcam", "ip": droidcam_ip}))
+
         async for message in websocket:
-            # Chuyển tiếp lệnh điều khiển từ trình duyệt xuống Robot
             if esp_socket:
                 try:
                     esp_socket.sendall((message + '\n').encode('utf-8'))
                 except:
                     print("[-] Mất kết nối TCP với Robot.")
                     esp_socket = None
-            else:
-                pass # Đợi Radar tìm lại kết nối
     except websockets.exceptions.ConnectionClosed:
         pass
+    except Exception as e:
+        print(f"[-] Lỗi WebSocket: {e}")
     finally:
         if websocket in connected_websockets:
             connected_websockets.remove(websocket)
+        print("[-] Giao diện Web đã ngắt kết nối.")
 
 async def start_ws_server():
     global main_loop
-    main_loop = asyncio.get_running_loop() # Lưu lại Loop chính cho các luồng phụ
+    main_loop = asyncio.get_running_loop()
     print(f"[*] Khởi tạo WebSocket Bridge trên cổng {WS_PORT}...")
     async with websockets.serve(bridge_handler, "0.0.0.0", WS_PORT):
         await asyncio.Future()
 
 # ==========================================
-# 5. HTTP SERVER (PHỤC VỤ FILE GIAO DIỆN)
+# HTTP SERVER (ANTI-CACHE BẮT BUỘC TẢI LẠI CODE MỚI)
 # ==========================================
 def start_http_server():
     current_dir = os.path.dirname(os.path.abspath(__file__))
-    # Trỏ đúng vào thư mục giao diện của đại ca
     target_dir = os.path.abspath(os.path.join(current_dir, '..', 'frontend', 'templates'))
     
     if not os.path.exists(target_dir):
-        print(f"[-] CẢNH BÁO: Không tìm thấy thư mục frontend tại {target_dir}")
+        print(f"[-] CẢNH BÁO: Không tìm thấy file Web tại: {target_dir}")
         return
 
-    class MyHandler(SimpleHTTPRequestHandler):
+    # Gắn cơ chế Anti-Cache vào HTTP Header
+    class NoCacheHandler(SimpleHTTPRequestHandler):
         def __init__(self, *args, **kwargs):
             super().__init__(*args, directory=target_dir, **kwargs)
+            
+        def end_headers(self):
+            self.send_header('Cache-Control', 'no-store, no-cache, must-revalidate, max-age=0')
+            self.send_header('Pragma', 'no-cache')
+            self.send_header('Expires', '0')
+            super().end_headers()
 
     try:
-        httpd = HTTPServer(("0.0.0.0", HTTP_PORT), MyHandler)
+        httpd = HTTPServer(("0.0.0.0", HTTP_PORT), NoCacheHandler)
         print(f"[*] Dashboard Web Server: http://localhost:{HTTP_PORT}")
         httpd.serve_forever()
     except Exception as e:
         print(f"[-] Lỗi HTTP Server: {e}")
 
-# ==========================================
-# 6. TIẾN TRÌNH TỰ ĐỘNG TÌM KIẾM (DISCOVERY)
-# ==========================================
 def discovery_task():
     global droidcam_ip, ESP_IP, esp_socket, main_loop
-    
     while True:
-        # 1. Tìm kiếm Robot
         if not esp_socket:
-            print("[*] Radar: Đang quét tìm Robot (ESP)...")
+            print("[*] Radar: Đang quét tìm ESP...")
             found_esp = scan_network(ESP_PORT)
             if found_esp:
                 ESP_IP = found_esp
                 connect_to_esp(ESP_IP)
         
-        # 2. Tìm kiếm Camera (DroidCam)
         if not droidcam_ip:
             print("[*] Radar: Đang quét tìm DroidCam...")
             found_cam = scan_network(DROIDCAM_PORT)
             if found_cam:
                 droidcam_ip = found_cam
-                print(f"[+] Tìm thấy DroidCam tại IP: {droidcam_ip}")
-                
-                # Thông báo cho tất cả các tab web đang mở để hiện Video
+                print(f"[+] Tìm thấy DroidCam tại: {droidcam_ip}")
                 if main_loop:
                     msg = json.dumps({"type": "droidcam", "ip": droidcam_ip})
                     for ws in list(connected_websockets):
-                        # GỌI ĐÚNG LOOP CHÍNH ĐỂ TRÁNH CRASH ĐA LUỒNG
                         asyncio.run_coroutine_threadsafe(ws.send(msg), main_loop)
 
-        # Nghỉ một lúc rồi quét lại nếu vẫn thiếu thiết bị
-        if esp_socket and droidcam_ip:
-            break # Tìm thấy đủ rồi thì dừng quét để tiết kiệm băng thông
+        if esp_socket and droidcam_ip: break
         time.sleep(10)
 
-# ==========================================
-# KHỞI CHẠY
-# ==========================================
 if __name__ == "__main__":
-    # Chạy Radar quét mạng trong luồng riêng
     threading.Thread(target=discovery_task, daemon=True).start()
-    
-    # Chạy luồng lắng nghe dữ liệu trả về từ ESP
     threading.Thread(target=esp_receive_task, daemon=True).start()
-    
-    # Chạy Web Server phục vụ file tĩnh
     threading.Thread(target=start_http_server, daemon=True).start()
-    
-    # Tự động mở trình duyệt
     threading.Timer(2, lambda: webbrowser.open(f"http://localhost:{HTTP_PORT}/index.html")).start()
     
-    # Chạy WebSocket Server chính (Blocking loop)
     try:
         asyncio.run(start_ws_server())
     except KeyboardInterrupt:
