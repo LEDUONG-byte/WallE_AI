@@ -1,0 +1,28 @@
+<!DOCTYPE html>
+<html lang="vi">
+<head>
+    <meta charset="UTF-8">
+    <title>Video Frame Extractor</title>
+    <style>
+        body { font-family: sans-serif; max-width: 500px; margin: 50px auto; text-align: center; background: #f4f4f4; }
+        .container { background: white; padding: 20px; border-radius: 8px; box-shadow: 0 2px 10px rgba(0,0,0,0.1); }
+        input, button { margin-top: 15px; width: 100%; padding: 10px; box-sizing: border-box; }
+        button { background: #28a745; color: white; border: none; cursor: pointer; font-weight: bold; }
+        button:hover { background: #218838; }
+    </style>
+</head>
+<body>
+    <div class="container">
+        <h2>Tách Video sang Ảnh (ZIP)</h2>
+        <form action="/process" method="post" enctype="multipart/form-data">
+            <label>Chọn Video:</label>
+            <input type="file" name="video" accept="video/*" required>
+            
+            <label>Cứ mỗi N frames lấy 1 ảnh:</label>
+            <input type="number" name="interval" value="10" min="1">
+            
+            <button type="submit">TÁCH VÀ TẢI VỀ (.ZIP)</button>
+        </form>
+    </div>
+</body>
+</html>

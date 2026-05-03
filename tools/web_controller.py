@@ -22,6 +22,7 @@ ESP_IP = None
 droidcam_ip = None
 esp_socket = None
 connected_websockets = set()
+main_loop = None  # Cần biến này để các luồng (thread) phụ có thể gọi lệnh tới asyncio
 
 # ==========================================
 # 2. HÀM QUÉT RADAR MẠNG NỘI BỘ
@@ -74,13 +75,44 @@ def connect_to_esp(ip):
         esp_socket = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
         esp_socket.settimeout(3)
         esp_socket.connect((ip, ESP_PORT))
-        esp_socket.settimeout(None)
+        esp_socket.settimeout(None) # Đưa về dạng blocking để luồng nhận dữ liệu hoạt động
         print("[+] ĐÃ KẾT NỐI ROBOT THÀNH CÔNG!")
         return True
     except:
         esp_socket = None
         print(f"[-] Không thể kết nối tới Robot tại {ip}")
         return False
+
+# ==========================================
+# 3.1. LUỒNG LẮNG NGHE DỮ LIỆU TỪ ROBOT (CHIỀU VỀ)
+# ==========================================
+def esp_receive_task():
+    """Luồng liên tục đọc phản hồi từ ESP và đẩy lên Web"""
+    global esp_socket, main_loop
+    while True:
+        if esp_socket and main_loop:
+            try:
+                # Đọc tối đa 1024 byte mỗi lần
+                data = esp_socket.recv(1024)
+                if data:
+                    # Gói dữ liệu lại và ném lên toàn bộ giao diện Web
+                    msg = json.dumps({
+                        "type": "esp_data", 
+                        "data": data.decode('utf-8', errors='ignore')
+                    })
+                    for ws in list(connected_websockets):
+                        asyncio.run_coroutine_threadsafe(ws.send(msg), main_loop)
+                else:
+                    # Mất kết nối
+                    print("[-] ESP ngắt kết nối.")
+                    esp_socket.close()
+                    esp_socket = None
+            except Exception as e:
+                if esp_socket:
+                    esp_socket.close()
+                esp_socket = None
+        else:
+            time.sleep(1) # Nghỉ ngơi nếu chưa kết nối ESP
 
 # ==========================================
 # 4. WEBSOCKET HANDLER (GIAO TIẾP VỚI WEB)
@@ -103,16 +135,16 @@ async def bridge_handler(websocket):
                     print("[-] Mất kết nối TCP với Robot.")
                     esp_socket = None
             else:
-                # Nếu chưa có kết nối Robot, thử tìm lại
-                pass
+                pass # Đợi Radar tìm lại kết nối
     except websockets.exceptions.ConnectionClosed:
         pass
     finally:
-        connected_websockets.add(websocket) # Xóa khỏi danh sách khi đóng tab
         if websocket in connected_websockets:
             connected_websockets.remove(websocket)
 
 async def start_ws_server():
+    global main_loop
+    main_loop = asyncio.get_running_loop() # Lưu lại Loop chính cho các luồng phụ
     print(f"[*] Khởi tạo WebSocket Bridge trên cổng {WS_PORT}...")
     async with websockets.serve(bridge_handler, "0.0.0.0", WS_PORT):
         await asyncio.Future()
@@ -122,7 +154,7 @@ async def start_ws_server():
 # ==========================================
 def start_http_server():
     current_dir = os.path.dirname(os.path.abspath(__file__))
-    # Trỏ đúng vào thư mục giao diện của bạn
+    # Trỏ đúng vào thư mục giao diện của đại ca
     target_dir = os.path.abspath(os.path.join(current_dir, '..', 'frontend', 'templates'))
     
     if not os.path.exists(target_dir):
@@ -144,7 +176,7 @@ def start_http_server():
 # 6. TIẾN TRÌNH TỰ ĐỘNG TÌM KIẾM (DISCOVERY)
 # ==========================================
 def discovery_task():
-    global droidcam_ip, ESP_IP
+    global droidcam_ip, ESP_IP, esp_socket, main_loop
     
     while True:
         # 1. Tìm kiếm Robot
@@ -164,14 +196,11 @@ def discovery_task():
                 print(f"[+] Tìm thấy DroidCam tại IP: {droidcam_ip}")
                 
                 # Thông báo cho tất cả các tab web đang mở để hiện Video
-                msg = json.dumps({"type": "droidcam", "ip": droidcam_ip})
-                # Sử dụng loop chính để gửi vì websockets yêu cầu async
-                try:
-                    loop = asyncio.get_event_loop()
+                if main_loop:
+                    msg = json.dumps({"type": "droidcam", "ip": droidcam_ip})
                     for ws in list(connected_websockets):
-                        asyncio.run_coroutine_threadsafe(ws.send(msg), loop)
-                except:
-                    pass
+                        # GỌI ĐÚNG LOOP CHÍNH ĐỂ TRÁNH CRASH ĐA LUỒNG
+                        asyncio.run_coroutine_threadsafe(ws.send(msg), main_loop)
 
         # Nghỉ một lúc rồi quét lại nếu vẫn thiếu thiết bị
         if esp_socket and droidcam_ip:
@@ -185,13 +214,16 @@ if __name__ == "__main__":
     # Chạy Radar quét mạng trong luồng riêng
     threading.Thread(target=discovery_task, daemon=True).start()
     
+    # Chạy luồng lắng nghe dữ liệu trả về từ ESP
+    threading.Thread(target=esp_receive_task, daemon=True).start()
+    
     # Chạy Web Server phục vụ file tĩnh
     threading.Thread(target=start_http_server, daemon=True).start()
     
     # Tự động mở trình duyệt
     threading.Timer(2, lambda: webbrowser.open(f"http://localhost:{HTTP_PORT}/index.html")).start()
     
-    # Chạy WebSocket Server chính
+    # Chạy WebSocket Server chính (Blocking loop)
     try:
         asyncio.run(start_ws_server())
     except KeyboardInterrupt:
