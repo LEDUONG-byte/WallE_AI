@@ -1,0 +1,250 @@
+<!DOCTYPE html>
+<html lang="vi">
+<head>
+    <meta charset="UTF-8">
+    <title>Wall-E Advanced Vision</title>
+    <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">
+    
+    <script src="https://cdn.tailwindcss.com"></script>
+    <script src="https://unpkg.com/lucide@latest"></script>
+    
+    <style>
+        body { font-family: 'Plus Jakarta Sans', sans-serif; background-color: #fdf8f6; margin: 0; overscroll-behavior-y: none; }
+        .glass-card { background: rgba(255, 255, 255, 0.7); backdrop-filter: blur(12px); border: 1px solid rgba(255, 255, 255, 0.3); border-radius: 24px; box-shadow: 0 8px 32px 0 rgba(31, 38, 135, 0.07); }
+        .motor-btn { transition: all 0.1s; box-shadow: 0 4px 12px rgba(0,0,0,0.05); cursor: pointer; user-select: none; touch-action: none; }
+        .motor-btn.active-touch { transform: scale(0.92); background-color: #f97316; color: white; border-color: #f97316; }
+        .status-dot { width: 8px; height: 8px; border-radius: 50%; display: inline-block; }
+        .video-feed { width: 100%; height: 100%; object-fit: cover; border-radius: 16px; background: #000; }
+        .compass-dial { transition: transform 0.15s ease-out; }
+    </style>
+</head>
+<body class="min-h-screen flex overflow-hidden">
+    <aside class="w-64 bg-white border-r border-gray-100 p-6 flex flex-col hidden lg:flex text-gray-500 z-20">
+        <div class="flex items-center gap-2 mb-10">
+            <div class="bg-orange-500 p-2 rounded-lg text-white"><i data-lucide="bot"></i></div>
+            <span class="font-extrabold text-xl tracking-tight text-gray-800">WALL-E AI</span>
+        </div>
+        <nav class="space-y-1 mb-10">
+            <div class="flex items-center gap-3 p-3 bg-orange-50 text-orange-600 rounded-xl font-bold text-sm">
+                <i data-lucide="layout-dashboard" class="w-4 h-4"></i> Dashboard
+            </div>
+        </nav>
+    </aside>
+
+    <main class="flex-1 p-4 lg:p-8 overflow-y-auto relative">
+        <header class="flex justify-end gap-4 mb-6">
+            <div id="status-pill" class="flex items-center gap-2 bg-red-50 px-4 py-2 rounded-full border border-red-100 h-10 transition-colors">
+                <span id="status-dot" class="status-dot bg-red-500 animate-pulse"></span>
+                <span id="status-text" class="text-xs font-bold text-red-600 uppercase">OFFLINE</span>
+            </div>
+        </header>
+
+        <div class="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-12 gap-6">
+            <div class="lg:col-span-7 glass-card p-4 flex flex-col min-h-[400px]">
+                <div class="flex justify-between items-center mb-4 px-2">
+                    <h2 class="font-bold text-gray-800 uppercase text-xs tracking-widest flex items-center gap-2"><i data-lucide="camera" class="w-4 h-4 text-orange-500"></i> Live Vision</h2>
+                    <span id="cam-status" class="text-[10px] font-bold text-gray-400 uppercase">Đang quét...</span>
+                </div>
+                <div class="flex-1 rounded-2xl overflow-hidden bg-gray-100 relative shadow-inner">
+                    <img id="video-stream" src="" class="video-feed hidden">
+                    <div id="video-placeholder" class="absolute inset-0 flex flex-col items-center justify-center text-gray-400">
+                        <i data-lucide="camera-off" class="w-12 h-12 mb-3 opacity-50"></i>
+                        <span class="text-xs font-medium">Chưa kết nối DroidCam</span>
+                    </div>
+                </div>
+            </div>
+
+            <div class="lg:col-span-5 glass-card p-6 flex flex-col items-center justify-center relative">
+                <h2 class="font-bold text-gray-800 uppercase text-xs tracking-widest w-full text-left mb-8">Điều hướng</h2>
+                <div class="grid grid-cols-3 gap-3 md:gap-4 select-none">
+                    <button onpointerdown="motorSend('D:80:200', this)" onpointerup="motorStop(this)" onpointerleave="motorStop(this)" class="motor-btn w-16 h-16 bg-white rounded-3xl border border-gray-100 flex items-center justify-center"><i data-lucide="corner-up-left"></i></button>
+                    <button onpointerdown="motorSend('D:200:200', this)" onpointerup="motorStop(this)" onpointerleave="motorStop(this)" class="motor-btn w-16 h-16 bg-white rounded-3xl border border-gray-100 flex items-center justify-center"><i data-lucide="chevron-up"></i></button>
+                    <button onpointerdown="motorSend('D:200:80', this)" onpointerup="motorStop(this)" onpointerleave="motorStop(this)" class="motor-btn w-16 h-16 bg-white rounded-3xl border border-gray-100 flex items-center justify-center"><i data-lucide="corner-up-right"></i></button>
+                    
+                    <button onpointerdown="motorSend('D:-200:200', this)" onpointerup="motorStop(this)" onpointerleave="motorStop(this)" class="motor-btn w-16 h-16 bg-white rounded-3xl border border-gray-100 flex items-center justify-center"><i data-lucide="rotate-ccw"></i></button>
+                    <button onpointerdown="motorStop(this)" class="motor-btn w-16 h-16 bg-orange-50 rounded-3xl border border-orange-100 flex items-center justify-center"><i data-lucide="octagon" class="text-orange-500"></i></button>
+                    <button onpointerdown="motorSend('D:200:-200', this)" onpointerup="motorStop(this)" onpointerleave="motorStop(this)" class="motor-btn w-16 h-16 bg-white rounded-3xl border border-gray-100 flex items-center justify-center"><i data-lucide="rotate-cw"></i></button>
+                    
+                    <button onpointerdown="motorSend('D:-80:-200', this)" onpointerup="motorStop(this)" onpointerleave="motorStop(this)" class="motor-btn w-16 h-16 bg-white rounded-3xl border border-gray-100 flex items-center justify-center"><i data-lucide="corner-down-left"></i></button>
+                    <button onpointerdown="motorSend('D:-200:-200', this)" onpointerup="motorStop(this)" onpointerleave="motorStop(this)" class="motor-btn w-16 h-16 bg-white rounded-3xl border border-gray-100 flex items-center justify-center"><i data-lucide="chevron-down"></i></button>
+                    <button onpointerdown="motorSend('D:-200:-80', this)" onpointerup="motorStop(this)" onpointerleave="motorStop(this)" class="motor-btn w-16 h-16 bg-white rounded-3xl border border-gray-100 flex items-center justify-center"><i data-lucide="corner-down-right"></i></button>
+                </div>
+            </div>
+
+            <div class="lg:col-span-5 glass-card p-6 flex flex-col items-center">
+                <h2 class="font-bold text-gray-800 uppercase text-xs tracking-widest w-full mb-4">Góc Xoay (Yaw) & Telemetry</h2>
+                <div class="flex items-center gap-6 w-full justify-around">
+                    <div class="relative w-28 h-28 flex items-center justify-center">
+                        <div class="absolute inset-0 border-[4px] border-dashed border-gray-200 rounded-full"></div>
+                        <div id="compass-dial" class="absolute inset-0 compass-dial"><div class="w-1.5 h-3 bg-orange-500 mx-auto rounded-full mt-[-2px]"></div></div>
+                        <div class="text-center bg-white/90 backdrop-blur-sm w-16 h-16 rounded-full flex flex-col items-center justify-center shadow-sm z-20">
+                            <div id="yaw-value" class="text-sm font-black text-gray-800">0.0°</div>
+                        </div>
+                    </div>
+                    <div class="flex-1 text-xs text-gray-600 font-mono space-y-1 bg-gray-50 p-3 rounded-lg border border-gray-100">
+                        <div>Yaw: <span id="val-s1" class="font-bold text-orange-500">0</span></div>
+                        <div>Pin: <span id="val-s2" class="font-bold">0</span></div>
+                        <div>Enc L: <span id="val-s3" class="font-bold">0</span></div>
+                        <div>Enc R: <span id="val-s4" class="font-bold">0</span></div>
+                        <div>Tay Trái: <span id="val-s5" class="font-bold text-gray-400">TRỐNG</span></div>
+                        <div>Tay Phải: <span id="val-s6" class="font-bold text-gray-400">TRỐNG</span></div>
+                    </div>
+                </div>
+            </div>
+
+            <div class="lg:col-span-7 glass-card p-6">
+                <h2 class="font-bold text-gray-800 uppercase text-xs tracking-widest w-full mb-4">Hệ thống Khớp (Servo)</h2>
+                <div id="servo-container" class="grid grid-cols-1 md:grid-cols-2 gap-4">
+                    </div>
+            </div>
+        </div>
+    </main>
+
+    <script>
+        let ws;
+        let currentCamIp = null;
+        let currentCmd = ''; 
+        let robotOnline = false;
+        let lastDataTime = 0;
+
+        const servos = [
+            { id: 0,  name: "Vai Phải", min: 120, max: 600, def: 350 },
+            { id: 14, name: "Vai Trái", min: 120, max: 600, def: 350 },
+            { id: 1,  name: "Tay Phải", min: 380, max: 550, def: 380 },
+            { id: 15, name: "Tay Trái", min: 220, max: 380, def: 380 }
+        ];
+
+        function updateConnectionStatus(isOnline) {
+            const pill = document.getElementById('status-pill');
+            const dot = document.getElementById('status-dot');
+            const text = document.getElementById('status-text');
+
+            if (isOnline) {
+                pill.className = 'flex items-center gap-2 bg-green-50 px-4 py-2 rounded-full border border-green-100 h-10 transition-colors';
+                dot.className = 'status-dot bg-green-500';
+                text.innerText = 'ONLINE';
+                text.className = 'text-xs font-bold text-green-600 uppercase tracking-widest';
+            } else {
+                pill.className = 'flex items-center gap-2 bg-red-50 px-4 py-2 rounded-full border border-red-100 h-10 transition-colors';
+                dot.className = 'status-dot bg-red-500 animate-pulse';
+                text.innerText = 'OFFLINE';
+                text.className = 'text-xs font-bold text-red-600 uppercase tracking-widest';
+            }
+        }
+
+        function motorSend(cmd, btn) {
+            if(btn) btn.classList.add('active-touch');
+            if (ws && ws.readyState === WebSocket.OPEN) {
+                if (currentCmd !== cmd) { 
+                    ws.send(cmd);
+                    currentCmd = cmd;
+                }
+            }
+        }
+
+        function motorStop(btn) {
+            if(btn) btn.classList.remove('active-touch');
+            if (ws && ws.readyState === WebSocket.OPEN) {
+                ws.send('D:0:0');
+                currentCmd = ''; 
+            }
+        }
+
+        function renderServos() {
+            let html = '';
+            servos.forEach(s => {
+                html += `
+                <div class="bg-white p-3 rounded-xl border border-gray-100 shadow-sm">
+                    <div class="flex justify-between items-center mb-2">
+                        <span class="text-[10px] font-bold text-gray-500 uppercase">KÊNH ${s.id} - ${s.name}</span>
+                        <span class="text-[10px] font-mono font-black text-orange-600 bg-orange-100 px-1.5 py-0.5 rounded" id="val-s-p-${s.id}">${s.def}</span>
+                    </div>
+                    <input type="range" min="${s.min}" max="${s.max}" value="${s.def}" 
+                        class="w-full h-2 bg-gray-200 rounded-lg appearance-none cursor-pointer accent-orange-500"
+                        oninput="document.getElementById('val-s-p-${s.id}').innerText = this.value; if(ws && ws.readyState === 1) ws.send('S:${s.id}:'+this.value)">
+                </div>`;
+            });
+            document.getElementById('servo-container').innerHTML = html;
+        }
+
+        function processRobotData(rawText) {
+            const lines = rawText.split('\n');
+            lines.forEach(line => {
+                line = line.trim();
+                if (line.startsWith('T:')) {
+                    const values = line.substring(2).split(',');
+                    if (values.length >= 6) {
+                        // Xác nhận đã nhận được dữ liệu thực tế từ Robot
+                        lastDataTime = Date.now();
+                        if (!robotOnline) {
+                            robotOnline = true;
+                            updateConnectionStatus(true);
+                        }
+
+                        const yaw = parseFloat(values[0]);
+                        document.getElementById('yaw-value').innerText = yaw.toFixed(1) + '°';
+                        document.getElementById('compass-dial').style.transform = `rotate(${yaw}deg)`;
+                        document.getElementById('val-s1').innerText = yaw.toFixed(1);
+                        document.getElementById('val-s2').innerText = values[1];
+                        document.getElementById('val-s3').innerText = values[2];
+                        document.getElementById('val-s4').innerText = values[3];
+                        
+                        const swL = document.getElementById('val-s5');
+                        swL.innerText = values[5] === '1' ? 'CÓ VẬT' : 'TRỐNG';
+                        swL.className = values[5] === '1' ? 'font-bold text-green-500' : 'font-bold text-gray-400';
+
+                        const swR = document.getElementById('val-s6');
+                        swR.innerText = values[4] === '1' ? 'CÓ VẬT' : 'TRỐNG';
+                        swR.className = values[4] === '1' ? 'font-bold text-green-500' : 'font-bold text-gray-400';
+                    }
+                }
+            });
+        }
+
+        function connect() {
+            const host = window.location.hostname || 'localhost';
+            ws = new WebSocket(`ws://${host}:8765`);
+            
+            // Bỏ dòng báo ONLINE lập tức ở đây, để Watchdog tự động cập nhật khi có dữ liệu
+            ws.onopen = () => {}; 
+
+            ws.onmessage = (event) => {
+                try {
+                    const data = JSON.parse(event.data);
+                    if (data.type === 'droidcam') {
+                        currentCamIp = data.ip;
+                        document.getElementById('video-stream').src = `http://${data.ip}:4747/video`;
+                        document.getElementById('video-stream').classList.remove('hidden');
+                        document.getElementById('video-placeholder').classList.add('hidden');
+                        document.getElementById('cam-status').innerText = 'STREAMING: ' + data.ip;
+                    } else if (data.type === 'esp_data') {
+                        processRobotData(data.data);
+                    }
+                } catch (e) {
+                    processRobotData(event.data);
+                }
+            };
+
+            ws.onclose = () => {
+                robotOnline = false;
+                updateConnectionStatus(false);
+                setTimeout(connect, 2000);
+            };
+        }
+
+        window.onload = () => {
+            renderServos();
+            if (typeof lucide !== 'undefined') lucide.createIcons();
+            connect();
+
+            // Watchdog: Kiểm tra timeout (nếu 2 giây không có dữ liệu -> OFFLINE)
+            setInterval(() => {
+                if (robotOnline && (Date.now() - lastDataTime > 2000)) {
+                    robotOnline = false;
+                    updateConnectionStatus(false);
+                }
+            }, 1000);
+        };
+    </script>
+</body>
+</html>
